@@ -22,17 +22,22 @@ class ChatProvider(Protocol):
         ...
 
 
-class OpenAIProvider:
+class OpenRouterProvider:
     def __init__(
         self,
-        api_key: str | None,
-        model: str = "gpt-4o-mini",
-        base_url: str = "https://api.openai.com/v1",
+        api_key: str,
+        model: str = "openai/gpt-4o-mini",
+        app_name: str = "Telegram AI Bot",
+        site_url: str | None = None,
         timeout: float = 60.0,
     ) -> None:
+        if not api_key:
+            raise ValueError("OpenRouter API key is required")
         self._api_key = api_key
         self._model = model
-        self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        self._app_name = app_name
+        self._site_url = site_url
+        self._endpoint = "https://openrouter.ai/api/v1/chat/completions"
         self._timeout = timeout
 
     def complete(self, messages: Sequence[ChatMessage]) -> str:
@@ -43,9 +48,13 @@ class OpenAIProvider:
                 for message in messages
             ],
         }
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._api_key}",
+            "X-Title": self._app_name,
+        }
+        if self._site_url:
+            headers["HTTP-Referer"] = self._site_url
 
         request = Request(
             self._endpoint,
@@ -92,7 +101,7 @@ class AICore:
     def __init__(
         self,
         provider: ChatProvider,
-        system_prompt: str = "You are a helpful assistant.",
+        system_prompt: str = "You are a chat assistant, you get chat history from corp chat and then you summarize it",
         history_size: int = 20,
     ) -> None:
         if history_size < 2:

@@ -4,14 +4,35 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from main import AICore, OpenAIProvider, ProviderError
+from main import AICore, OpenRouterProvider, ProviderError
 
 
 logger = logging.getLogger(__name__)
+
+
+def load_env_file() -> None:
+    env_path = Path(__file__).resolve().with_name(".env")
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not key.strip():
+            raise ValueError(f"Invalid .env entry on line {line_number}")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key.strip(), value)
 
 
 class TelegramError(RuntimeError):
@@ -160,15 +181,26 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    load_env_file()
 
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        raise SystemExit("Set TELEGRAM_BOT_TOKEN before starting the bot.")
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    missing = [
+        name
+        for name, value in {
+            "TELEGRAM_BOT_TOKEN": token,
+            "OPENROUTER_API_KEY": openrouter_api_key,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise SystemExit(f"Set {', '.join(missing)} in the .env file before starting the bot.")
 
-    provider = OpenAIProvider(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+    provider = OpenRouterProvider(
+        api_key=openrouter_api_key,
+        model=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+        app_name=os.getenv("OPENROUTER_APP_NAME", "Telegram AI Bot"),
+        site_url=os.getenv("OPENROUTER_SITE_URL") or None,
     )
     ai_core = AICore(provider)
     TelegramBot(token, ai_core).run()
