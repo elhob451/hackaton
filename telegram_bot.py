@@ -45,10 +45,14 @@ class TelegramBot:
         token: str,
         ai_core: AICore,
         poll_timeout: int = 30,
+        log_limit: int = 5000,
     ) -> None:
         self._base_url = f"https://api.telegram.org/bot{token}"
         self._ai_core = ai_core
         self._poll_timeout = poll_timeout
+        self._log_limit = log_limit
+        self._message_log: dict[int, list[dict[str, Any]]] = {}
+        self.dumped_messages: dict[int, list[dict[str, Any]]] = {}
 
     def run(self) -> None:
         offset: int | None = None
@@ -91,6 +95,9 @@ class TelegramBot:
         if chat_id is None:
             return
 
+        if chat.get("type") in ("group", "supergroup"):
+            self._record_message(chat_id, message)
+
         try:
             self._handle_text(chat_id, text.strip())
         except ProviderError as exc:
@@ -124,12 +131,21 @@ class TelegramBot:
         if command == "/help":
             self._send_text(
                 chat_id,
-                "Send any text to chat with the AI. Use /reset to clear this chat's history.",
+                "Send any text to chat with the AI. Use /reset to clear this chat's history. "
+                "In groups, all messages are collected automatically; use /dump to save them to memory.",
             )
             return
         if command == "/reset":
             self._ai_core.reset(conversation_id)
             self._send_text(chat_id, "Conversation history cleared.")
+            return
+        if command == "/dump":
+            messages = list(self._message_log.get(chat_id, []))
+            self.dumped_messages[chat_id] = messages
+            self._send_text(
+                chat_id,
+                f"Saved {len(messages)} messages from this chat to memory.",
+            )
             return
 
         self._api_request(
@@ -138,6 +154,28 @@ class TelegramBot:
         )
         reply = self._ai_core.respond(conversation_id, text)
         self._send_text(chat_id, reply)
+
+    def _record_message(self, chat_id: int, message: dict[str, Any]) -> None:
+        sender = message.get("from") or {}
+        name = (
+            sender.get("username")
+            or " ".join(
+                part
+                for part in (sender.get("first_name"), sender.get("last_name"))
+                if part
+            )
+            or str(sender.get("id", "unknown"))
+        )
+        entry = {
+            "message_id": message.get("message_id"),
+            "date": message.get("date"),
+            "from": name,
+            "text": message.get("text", ""),
+        }
+        log = self._message_log.setdefault(chat_id, [])
+        log.append(entry)
+        if len(log) > self._log_limit:
+            del log[: len(log) - self._log_limit]
 
     def _send_text(self, chat_id: int | str, text: str) -> None:
         for start in range(0, len(text), 4096):
