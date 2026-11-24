@@ -176,7 +176,9 @@ class TelegramBot:
             return
 
         if command == "/summary":
-            await self._handle_chat_summary(chat_id)
+            if not isinstance(sender_id, int):
+                raise UserBotError("Не удалось определить ваш Telegram ID.")
+            await self._handle_chat_summary(chat_id, sender_id)
             return
 
         if command not in self._PRIVATE_ONLY_COMMANDS:
@@ -253,11 +255,11 @@ class TelegramBot:
         )
         await self._send_text_async(chat_id, text)
 
-    async def _handle_chat_summary(self, chat_id: int | str) -> None:
+    async def _handle_chat_summary(self, chat_id: int | str, user_id: int) -> None:
         messages = self._message_log.get(chat_id, [])
         if not messages:
             await self._send_text_async(
-                chat_id,
+                user_id,
                 "Пока нет сохраненных сообщений в этом чате для саммари.",
             )
             return
@@ -267,7 +269,7 @@ class TelegramBot:
         )
         if not transcript.strip():
             await self._send_text_async(
-                chat_id,
+                user_id,
                 "Пока нет сохраненных сообщений в этом чате для саммари.",
             )
             return
@@ -277,7 +279,7 @@ class TelegramBot:
             {"chat_id": chat_id, "action": "typing"},
         )
         summary = await asyncio.to_thread(self._ai_core.summarize, transcript)
-        await self._send_text_async(chat_id, summary)
+        await self._send_text_async(user_id, summary)
 
     async def _handle_folders(self, chat_id: int | str, user_id: int) -> None:
         await self._api_request_async(
