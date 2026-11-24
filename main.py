@@ -102,35 +102,17 @@ class AICore:
         self,
         provider: ChatProvider,
         system_prompt: str = "You are a chat assistant, you get chat history from corp chat and then you summarize it",
-        history_size: int = 20,
     ) -> None:
-        if history_size < 2:
-            raise ValueError("history_size must be at least 2")
         self._provider = provider
         self._system_prompt = system_prompt
-        self._history_size = history_size
-        self._histories: dict[str, list[ChatMessage]] = {}
 
-    def respond(self, conversation_id: str, text: str) -> str:
-        text = text.strip()
-        if not text:
-            raise ValueError("Message text cannot be empty")
+    def summarize(self, transcript: str) -> str:
+        transcript = transcript.strip()
+        if not transcript:
+            raise ValueError("Transcript cannot be empty")
 
-        history = self._histories.get(conversation_id, [])
-        user_message = ChatMessage(role="user", content=text)
         messages = [
             ChatMessage(role="system", content=self._system_prompt),
-            *history,
-            user_message,
+            ChatMessage(role="user", content=transcript),
         ]
-        reply = self._provider.complete(messages)
-        assistant_message = ChatMessage(role="assistant", content=reply)
-        self._histories[conversation_id] = [
-            *history,
-            user_message,
-            assistant_message,
-        ][-self._history_size :]
-        return reply
-
-    def reset(self, conversation_id: str) -> None:
-        self._histories.pop(conversation_id, None)
+        return self._provider.complete(messages)

@@ -52,7 +52,6 @@ class TelegramBot:
         self._poll_timeout = poll_timeout
         self._log_limit = log_limit
         self._message_log: dict[int, list[dict[str, Any]]] = {}
-        self.dumped_messages: dict[int, list[dict[str, Any]]] = {}
 
     def run(self) -> None:
         offset: int | None = None
@@ -95,8 +94,7 @@ class TelegramBot:
         if chat_id is None:
             return
 
-        if chat.get("type") in ("group", "supergroup"):
-            self._record_message(chat_id, message)
+        self._record_message(chat_id, message)
 
         try:
             self._handle_text(chat_id, text.strip())
@@ -120,42 +118,33 @@ class TelegramBot:
 
     def _handle_text(self, chat_id: int | str, text: str) -> None:
         command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
-        conversation_id = str(chat_id)
 
-        if command == "/start":
-            self._send_text(
-                chat_id,
-                "Hello! Send me a message and I will forward it to the AI core.",
-            )
+        if command != "/summary":
             return
-        if command == "/help":
-            self._send_text(
-                chat_id,
-                "Send any text to chat with the AI. Use /reset to clear this chat's history. "
-                "In groups, all messages are collected automatically; use /dump to save them to memory.",
-            )
+
+        messages = self._message_log.get(chat_id, [])
+        if not messages:
+            self._send_text(chat_id, "No messages to summarize yet.")
             return
-        if command == "/reset":
-            self._ai_core.reset(conversation_id)
-            self._send_text(chat_id, "Conversation history cleared.")
-            return
-        if command == "/dump":
-            messages = list(self._message_log.get(chat_id, []))
-            self.dumped_messages[chat_id] = messages
-            self._send_text(
-                chat_id,
-                f"Saved {len(messages)} messages from this chat to memory.",
-            )
+
+        transcript = "\n".join(
+            f"{entry['from']}: {entry['text']}" for entry in messages if entry["text"]
+        )
+        if not transcript.strip():
+            self._send_text(chat_id, "No messages to summarize yet.")
             return
 
         self._api_request(
             "sendChatAction",
             {"chat_id": chat_id, "action": "typing"},
         )
-        reply = self._ai_core.respond(conversation_id, text)
-        self._send_text(chat_id, reply)
+        summary = self._ai_core.summarize(transcript)
+        self._send_text(chat_id, summary)
 
     def _record_message(self, chat_id: int, message: dict[str, Any]) -> None:
+        text = message.get("text", "")
+        if text.startswith("/"):
+            return
         sender = message.get("from") or {}
         name = (
             sender.get("username")
@@ -170,7 +159,7 @@ class TelegramBot:
             "message_id": message.get("message_id"),
             "date": message.get("date"),
             "from": name,
-            "text": message.get("text", ""),
+            "text": text,
         }
         log = self._message_log.setdefault(chat_id, [])
         log.append(entry)
